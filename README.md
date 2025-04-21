@@ -132,6 +132,16 @@ The bot includes sophisticated risk management features:
 - Detailed logs including position creation, orderbook events, market metrics, and API operations
 - Clean CLI display with unobtrusive success/fail responses
 
+## Context Files
+
+The `context` directory contains the original prompt and supporting documentation used to create this bot:
+
+- **prompt.md**: The original prompt detailing the requirements and specifications for the odds maximizer bot.
+- **sx-bet-dev-manual-revised.md**: Supplementary information for SX Bet API, including response structures and implementation guidelines.
+- **sx_bet_full_sections.md**: Additional detailed documentation on the SX Bet API functionality.
+
+These files are included for transparency and to provide context on the bot's design and implementation decisions. They may also serve as helpful reference material for anyone looking to understand or modify the codebase.
+
 ## License
 
 MIT 
