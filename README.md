@@ -1,6 +1,6 @@
 # SX Bet Odds Maximizer Bot
 
-A sophisticated betting bot designed for the SX.bet platform, a peer-to-peer betting exchange. The bot automatically maximizes profits by monitoring real-time market conditions, strategically placing maker orders at favorable odds, and dynamically managing positions based on market changes.
+A betting bot designed for SX Bet, a decentralized peer-to-peer betting exchange. The bot maximizes your odds by placing maker orders at above market odds, and dynamically managing your orders to maintain a desired premium as the market changes.
 
 ## Features
 
