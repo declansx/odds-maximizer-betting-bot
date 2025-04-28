@@ -7,12 +7,17 @@ import { cancelOrder, cancelOrders } from './orderManager.js';
 import { postMakerOrder } from './orderManager.js';
 import { roundToNearestStep } from '../utils/oddsUtils.js';
 import { ethers } from 'ethers';
+import { trackCancelledOrder } from './marketMonitor.js';
 
 // In-memory store for all active positions
 const positions = new Map();
 
 // Queue for position operations to prevent race conditions
 const operationQueues = new Map();
+
+// Track the last order update time per position
+const lastOrderUpdateTime = new Map();
+const MIN_ORDER_UPDATE_INTERVAL = 2500; // 2.5 seconds minimum between order updates
 
 /**
  * Creates a new position
@@ -29,6 +34,7 @@ export async function createNewPosition(positionData) {
     status: 'INITIALIZING',
     orderStatus: 'NONE',
     activeOrderHash: null,
+    pastOrderHashes: [],
     fillAmount: 0,
     fillPercentage: 0,
     logger,
@@ -119,21 +125,26 @@ export async function closePosition(positionId) {
   const position = positions.get(positionId);
   
   if (!position) {
-    throw new Error(`Position ${positionId} not found`);
+    return false;
   }
   
   // Queue this operation
   return await enqueueOperation(positionId, async () => {
     try {
-      position.logger.info('Closing position permanently');
+      position.logger.info('Closing position');
       
-      // Cancel any active orders
+      // If there's an active order, cancel it
       if (position.activeOrderHash) {
-        position.logger.info(`Cancelling active order: ${position.activeOrderHash}`);
+        position.logger.info(`Cancelling active order ${position.activeOrderHash}`);
+        // Track order for potential fills before cancellation
+        trackCancelledOrder(position.activeOrderHash, positionId);
         await cancelOrder(position.activeOrderHash);
-        position.activeOrderHash = null;
-        position.orderStatus = 'CANCELLED';
       }
+      
+      // Clear order tracking
+      position.activeOrderHash = null;
+      position.pastOrderHashes = [];
+      position.orderStatus = 'CANCELLED_CLOSE';
       
       // Unsubscribe from WebSocket
       position.logger.info(`Unsubscribing from order book for market: ${position.marketHash}`);
@@ -152,7 +163,7 @@ export async function closePosition(positionId) {
       return true;
     } catch (error) {
       position.logger.error(`Error closing position: ${error.message}`, { error });
-      throw error;
+      return false;
     }
   });
 }
@@ -200,15 +211,30 @@ export async function updateMarketData(positionId, marketData) {
           position.logger.info('Risk thresholds now OK, can resume order posting');
           await handleRiskThresholdResolution(position);
         }
+        // Always return early after risk threshold state changes
+        return;
       }
       
-      // If odds changed and we have an active order, update it
+      // If odds changed and we have an active order, check if we should update it
       if (!isRiskThresholdBreached && position.activeOrderHash && 
           position.bestTakerOdds !== position.lastOrderOdds) {
+          
+        // Implement rate limiting for order updates
+        const now = Date.now();
+        const lastUpdate = lastOrderUpdateTime.get(positionId) || 0;
+        
+        if (now - lastUpdate < MIN_ORDER_UPDATE_INTERVAL) {
+          position.logger.info(`Skipping order update due to rate limiting (last update was ${now - lastUpdate}ms ago)`);
+          return;
+        }
+            
         position.logger.info('Best taker odds changed, updating order', {
           previous: position.lastOrderOdds,
           new: position.bestTakerOdds
         });
+        
+        // Update timestamp before we start the update operation
+        lastOrderUpdateTime.set(positionId, now);
         
         await updateOrderForPosition(position);
       }
@@ -256,6 +282,8 @@ export async function updateFillStatus(positionId, fillAmount) {
           position.logger.info('Cancelling remaining order for completed position');
           await cancelOrder(position.activeOrderHash);
           position.activeOrderHash = null;
+          // Reset past order hashes since position is complete
+          position.pastOrderHashes = [];
           position.orderStatus = 'CANCELLED';
         }
         
@@ -350,6 +378,8 @@ async function handleRiskThresholdBreach(position) {
     // If there's an active order, cancel it
     if (position.activeOrderHash) {
       position.logger.warn(`Cancelling order ${position.activeOrderHash} due to risk threshold breach`);
+      // Track this order for potential fills
+      trackCancelledOrder(position.activeOrderHash, position.id);
       await cancelOrder(position.activeOrderHash);
       position.activeOrderHash = null;
       position.orderStatus = 'CANCELLED_RISK';
@@ -391,9 +421,41 @@ async function updateOrderForPosition(position) {
     // If there's an active order, cancel it first
     if (position.activeOrderHash) {
       position.logger.info(`Cancelling order ${position.activeOrderHash} to update odds`);
-      await cancelOrder(position.activeOrderHash);
-      position.activeOrderHash = null;
-      position.orderStatus = 'CANCELLED_UPDATE';
+      
+      // Track this order for potential fills
+      trackCancelledOrder(position.activeOrderHash, position.id);
+      
+      // Important: Wait for the cancel to complete before posting a new order
+      try {
+        const cancelResult = await cancelOrder(position.activeOrderHash);
+        
+        // Check if the order was actually cancelled
+        if (cancelResult.cancelledCount === 0) {
+          position.logger.warn('Order could not be cancelled - it may already be filled or cancelled. Checking fill status before proceeding.');
+          
+          // Add a small delay to allow any pending fill updates to process
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // If the position is completed, don't post a new order
+          if (position.status === 'COMPLETED') {
+            position.logger.info('Position is now completed, not posting new order');
+            position.activeOrderHash = null;
+            position.orderStatus = 'COMPLETED';
+            return;
+          }
+          
+          // If we get here, the order was likely cancelled but not filled
+          position.activeOrderHash = null;
+          position.orderStatus = 'CANCELLED_UPDATE';
+        } else {
+          position.activeOrderHash = null;
+          position.orderStatus = 'CANCELLED_UPDATE';
+        }
+      } catch (cancelError) {
+        position.logger.error(`Error cancelling order: ${cancelError.message}`, { error: cancelError });
+        // If cancel fails, do not continue with posting a new order
+        return;
+      }
     }
     
     // Skip if risk thresholds are breached
@@ -417,6 +479,9 @@ async function updateOrderForPosition(position) {
       position.status = 'COMPLETED';
       return;
     }
+    
+    // Add a small delay to ensure the cancel has propagated to the exchange
+    await new Promise(resolve => setTimeout(resolve, 500));
     
     // Post the updated order
     const result = await postMakerOrder({

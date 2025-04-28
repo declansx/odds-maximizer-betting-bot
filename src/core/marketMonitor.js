@@ -10,6 +10,11 @@ import { ADDRESSES, WS } from '../config/constants.js';
 const orderbooks = new Map();
 const pollingIntervals = new Map();
 
+// Track recently cancelled orders for fill detection
+// Map of orderHash -> {positionId, timestamp}
+const recentlyCancelledOrders = new Map();
+const RECENT_ORDER_TRACKING_TIME = 60000; // 1 minute
+
 /**
  * Initializes monitoring for a market
  * @param {Object} position - Position object
@@ -324,6 +329,31 @@ function calculateOrderbookMetrics(orderbook, position) {
   }
 }
 
+// Function to add an order to recently cancelled tracking
+export function trackCancelledOrder(orderHash, positionId) {
+  if (!orderHash || !positionId) return;
+  
+  recentlyCancelledOrders.set(orderHash, {
+    positionId,
+    timestamp: Date.now()
+  });
+  
+  // Set up cleanup to remove the tracking after timeout
+  setTimeout(() => {
+    recentlyCancelledOrders.delete(orderHash);
+  }, RECENT_ORDER_TRACKING_TIME);
+}
+
+// Periodically clean up expired entries
+setInterval(() => {
+  const now = Date.now();
+  for (const [hash, data] of recentlyCancelledOrders.entries()) {
+    if (now - data.timestamp > RECENT_ORDER_TRACKING_TIME) {
+      recentlyCancelledOrders.delete(hash);
+    }
+  }
+}, 60000); // Cleanup every minute
+
 /**
  * Handles WebSocket updates to the orderbook
  * @param {string} marketHash - Market hash
@@ -369,22 +399,47 @@ export async function handleOrderbookUpdate(marketHash, updates) {
       // Determine outcome for the taker (opposite of maker's outcome)
       const takerOutcome = isMakerBettingOutcomeOne ? 2 : 1;
       
-      // Check if this is for one of our positions
-      if (maker === ADDRESSES.MAKER) {
-        // Get all positions for this market
-        for (const positionId of orderbook.positions) {
-          try {
-            const position = getPosition(positionId);
-            if (position && position.activeOrderHash === orderHash && 
-                BigInt(fillAmount || '0') > 0) {
-              // Our order has been filled
-              logger.info(`Fill detected for order ${orderHash}, amount: ${fillAmount}`);
-              await updateFillStatus(positionId, fillAmount);
+      // Check if this is for one of our positions (case-insensitive comparison)
+      if (maker.toLowerCase() === ADDRESSES.MAKER.toLowerCase()) {
+        // Check for fills
+        const hasFill = BigInt(fillAmount || '0') > 0;
+        
+        if (hasFill) {
+          let foundPosition = false;
+          
+          // First check all positions for this market
+          for (const positionId of orderbook.positions) {
+            try {
+              const position = getPosition(positionId);
+              if (!position) continue;
+              
+              // Check if this matches the active order
+              if (position.activeOrderHash === orderHash) {
+                logger.info(`Fill detected for active order ${orderHash}, amount: ${fillAmount}`);
+                await updateFillStatus(positionId, fillAmount);
+                foundPosition = true;
+                break;
+              }
+            } catch (error) {
+              logger.error(`Error processing fill for position ${positionId}: ${error.message}`);
             }
-          } catch (error) {
-            logger.error(`Error processing fill for position ${positionId}: ${error.message}`);
+          }
+          
+          // If no position found with this active order, check recently cancelled orders
+          if (!foundPosition && recentlyCancelledOrders.has(orderHash)) {
+            const { positionId } = recentlyCancelledOrders.get(orderHash);
+            try {
+              const position = getPosition(positionId);
+              if (position) {
+                logger.info(`Fill detected for recently cancelled order ${orderHash}, amount: ${fillAmount}`);
+                await updateFillStatus(positionId, fillAmount);
+              }
+            } catch (error) {
+              logger.error(`Error processing fill for recently cancelled order: ${error.message}`);
+            }
           }
         }
+        
         // Skip further processing for our own orders
         continue;
       }

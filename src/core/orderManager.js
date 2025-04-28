@@ -99,15 +99,28 @@ export async function cancelOrders(orderHashes) {
       
       const result = await apiCancelOrders(orderHashes);
       
-      if (result.status !== 'success') {
-        throw new Error(`API error: ${JSON.stringify(result)}`);
-      }
+      // Check if we have a cancelledCount either at root or in data object
+      const cancelledCount = result.cancelledCount || (result.data && result.data.cancelledCount) || 0;
       
-      logger.info('Orders cancelled successfully', { 
-        cancelledCount: result.data.cancelledCount 
+      // Log the cancellation result
+      logger.info('Orders cancellation response received', { 
+        orderHashes,
+        cancelledCount,
+        expectedCount: orderHashes.length
       });
       
-      return result.data;
+      // If none of the orders were cancelled, it might indicate they're already filled/cancelled
+      if (cancelledCount === 0) {
+        logger.warn('No orders were cancelled - they may already be filled or cancelled', {
+          orderHashes
+        });
+      } else if (cancelledCount < orderHashes.length) {
+        logger.warn(`Only ${cancelledCount} of ${orderHashes.length} orders were cancelled - some may be filled or already cancelled`, {
+          orderHashes
+        });
+      }
+      
+      return { cancelledCount };
     } catch (error) {
       lastError = error;
       logger.error(`Error cancelling orders (attempt ${retryCount + 1}/${ORDER.MAX_RETRY_COUNT}): ${error.message}`, { error });
