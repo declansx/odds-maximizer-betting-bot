@@ -1,5 +1,6 @@
 // src/cli/viewPositions.js - CLI flow for viewing active positions
 import inquirer from 'inquirer';
+import chalk from 'chalk';
 import { getAllPositions, getPosition, updatePosition, closePosition } from '../core/positionManager.js';
 import { logger, cliLogger } from '../utils/logger.js';
 import { formatImpliedOdds, formatDecimalOdds } from '../utils/oddsUtils.js';
@@ -16,20 +17,25 @@ export async function viewPositions() {
     const positions = getAllPositions();
     
     if (!positions || positions.length === 0) {
-      cliLogger.info('No active positions found');
+      console.log('\n' + chalk.yellow('ℹ No active positions found'));
       return;
     }
     
     // Display positions list
-    cliLogger.info(`Found ${positions.length} active position(s):`);
+    console.log('\n' + chalk.cyan('┌' + '─'.repeat(60) + '┐'));
+    console.log(chalk.cyan('│') + chalk.bold(' ACTIVE POSITIONS ') + ' '.repeat(45) + chalk.cyan('│'));
+    console.log(chalk.cyan('└' + '─'.repeat(60) + '┘\n'));
     
     const positionChoice = await inquirer.prompt([
       {
         type: 'list',
         name: 'positionId',
-        message: 'Select a position to view:',
+        message: chalk.yellow('Select a position to view:'),
+        prefix: chalk.cyan('◆'),
         choices: positions.map(position => ({
-          name: `${position.teamOneName} vs ${position.teamTwoName} - ${position.outcomeName} (${Math.round(position.fillPercentage)}% filled)`,
+          name: chalk.white(`${position.teamOneName} vs ${position.teamTwoName} - `) + 
+                chalk.green(position.outcomeName) + 
+                chalk.dim(` (${Math.round(position.fillPercentage)}% filled)`),
           value: position.id
         }))
       }
@@ -39,7 +45,7 @@ export async function viewPositions() {
     const position = getPosition(positionChoice.positionId);
     
     if (!position) {
-      cliLogger.error('Position not found');
+      cliLogger.error(chalk.red('✗ Position not found'));
       return;
     }
     
@@ -51,11 +57,12 @@ export async function viewPositions() {
       {
         type: 'list',
         name: 'action',
-        message: 'What would you like to do with this position?',
+        message: chalk.yellow('What would you like to do with this position?'),
+        prefix: chalk.cyan('◆'),
         choices: [
-          { name: 'Close position permanently', value: 'close' },
-          { name: 'Edit position settings', value: 'edit' },
-          { name: 'Back to main menu', value: 'back' }
+          { name: chalk.red('Close position permanently'), value: 'close' },
+          { name: chalk.blue('Edit position settings'), value: 'edit' },
+          { name: chalk.yellow('Back to main menu'), value: 'back' }
         ]
       }
     ]);
@@ -75,7 +82,8 @@ export async function viewPositions() {
     }
     
   } catch (error) {
-    cliLogger.error(`Error viewing positions: ${error.message}`);
+    console.log('\n');
+    cliLogger.error(chalk.red(`✗ Error viewing positions: ${error.message}`));
     logger.error('Error in view positions flow:', error);
   }
 }
@@ -85,53 +93,64 @@ export async function viewPositions() {
  * @param {Object} position - Position object
  */
 function displayPositionDetails(position) {
-  cliLogger.info('\nPosition Details:');
-  cliLogger.info('=================');
-  cliLogger.info(`ID: ${position.id}`);
-  cliLogger.info(`Market: ${position.teamOneName} vs ${position.teamTwoName}`);
-  cliLogger.info(`Type: ${getMarketTypeName(position.marketType)}${position.line ? ` (${position.line})` : ''}`);
-  cliLogger.info(`Outcome: ${position.outcomeName}`);
-  cliLogger.info(`Start Date: ${formatDate(position.startDate)}`);
-  cliLogger.info(`Status: ${position.status}`);
-  cliLogger.info(`Order Status: ${position.orderStatus}`);
-  cliLogger.info(`Bet Size: ${position.maxFillAmount} USDC`);
-  cliLogger.info(`Filled: ${position.fillAmount} USDC (${position.fillPercentage.toFixed(2)}%)`);
+  console.log('\n' + chalk.cyan('┌' + '─'.repeat(60) + '┐'));
+  console.log(chalk.cyan('│') + chalk.bold(' POSITION DETAILS ') + ' '.repeat(44) + chalk.cyan('│'));
+  console.log(chalk.cyan('└' + '─'.repeat(60) + '┘\n'));
+  
+  // Basic Info
+  console.log(chalk.dim('ID: ') + chalk.white(position.id));
+  console.log(chalk.dim('Market: ') + chalk.white(`${position.teamOneName} vs ${position.teamTwoName}`));
+  console.log(chalk.dim('Type: ') + chalk.white(`${getMarketTypeName(position.marketType)}${position.line ? chalk.dim(` (${position.line})`) : ''}`));
+  console.log(chalk.dim('Outcome: ') + chalk.green(position.outcomeName));
+  console.log(chalk.dim('Start Date: ') + chalk.white(formatDate(position.startDate)));
+  console.log(chalk.dim('Status: ') + getStatusColor(position.status)(position.status));
+  console.log(chalk.dim('Order Status: ') + getStatusColor(position.orderStatus)(position.orderStatus));
+  console.log(chalk.dim('Bet Size: ') + chalk.yellow(`${position.maxFillAmount} USDC`));
+  console.log(chalk.dim('Filled: ') + chalk.yellow(`${position.fillAmount} USDC`) + chalk.dim(` (${position.fillPercentage.toFixed(2)}%)`));
   
   if (position.activeOrderHash) {
-    cliLogger.info(`Active Order: ${position.activeOrderHash}`);
+    console.log(chalk.dim('Active Order: ') + chalk.blue(position.activeOrderHash));
   }
   
   if (position.bestTakerOdds) {
-    cliLogger.info(`Current Best Taker Odds: ${formatImpliedOdds(position.bestTakerOdds)} (${formatDecimalOdds(1/position.bestTakerOdds)})`);
+    console.log(chalk.dim('Current Best Taker Odds: ') + 
+      chalk.yellow(formatImpliedOdds(position.bestTakerOdds)) + 
+      chalk.dim(` (${formatDecimalOdds(1/position.bestTakerOdds)})`));
   }
   
   if (position.lastOrderOdds) {
     const premiumOdds = position.lastOrderOdds * (1 - position.premium/100);
-    cliLogger.info(`Last Order Odds: ${formatImpliedOdds(premiumOdds)} (${formatDecimalOdds(1/premiumOdds)})`);
+    console.log(chalk.dim('Last Order Odds: ') + 
+      chalk.yellow(formatImpliedOdds(premiumOdds)) + 
+      chalk.dim(` (${formatDecimalOdds(1/premiumOdds)})`));
   }
   
-  cliLogger.info('\nRisk Settings:');
-  cliLogger.info(`Premium: ${position.premium}%`);
-  cliLogger.info(`Max Vig: ${position.maxVig}%`);
-  cliLogger.info(`Min Liquidity: ${position.minLiquidity} USDC`);
-  cliLogger.info(`Min Bet Size for Odds: ${position.minBetSizeOdds} USDC`);
-  cliLogger.info(`Min Bet Size for Vig: ${position.minBetSizeVig} USDC`);
+  // Risk Settings
+  console.log('\n' + chalk.cyan('Risk Settings:'));
+  console.log(chalk.dim('Premium: ') + chalk.yellow(`${position.premium}%`));
+  console.log(chalk.dim('Max Vig: ') + chalk.yellow(`${position.maxVig}%`));
+  console.log(chalk.dim('Min Liquidity: ') + chalk.yellow(`${position.minLiquidity} USDC`));
+  console.log(chalk.dim('Min Bet Size for Odds: ') + chalk.yellow(`${position.minBetSizeOdds} USDC`));
+  console.log(chalk.dim('Min Bet Size for Vig: ') + chalk.yellow(`${position.minBetSizeVig} USDC`));
   
-  cliLogger.info('\nMarket Status:');
+  // Market Status
+  console.log('\n' + chalk.cyan('Market Status:'));
   if (position.currentVig !== null) {
-    cliLogger.info(`Current Vig: ${position.currentVig.toFixed(2)}%`);
+    console.log(chalk.dim('Current Vig: ') + chalk.yellow(`${position.currentVig.toFixed(2)}%`));
   }
   
   if (position.currentLiquidity) {
-    cliLogger.info(`Liquidity Outcome 1: ${position.currentLiquidity.outcome1?.toFixed(2) || 'N/A'} USDC`);
-    cliLogger.info(`Liquidity Outcome 2: ${position.currentLiquidity.outcome2?.toFixed(2) || 'N/A'} USDC`);
+    console.log(chalk.dim('Liquidity Outcome 1: ') + chalk.yellow(`${position.currentLiquidity.outcome1?.toFixed(2) || 'N/A'} USDC`));
+    console.log(chalk.dim('Liquidity Outcome 2: ') + chalk.yellow(`${position.currentLiquidity.outcome2?.toFixed(2) || 'N/A'} USDC`));
   }
   
   if (position.operations.isRiskThresholdBreached) {
-    cliLogger.info('Risk Status: THRESHOLDS EXCEEDED');
+    console.log(chalk.dim('Risk Status: ') + chalk.red('THRESHOLDS EXCEEDED'));
   } else {
-    cliLogger.info('Risk Status: OK');
+    console.log(chalk.dim('Risk Status: ') + chalk.green('OK'));
   }
+  
+  console.log('\n' + chalk.dim('─'.repeat(60)));
 }
 
 /**
@@ -144,22 +163,25 @@ async function handleClosePosition(position) {
     {
       type: 'confirm',
       name: 'confirm',
-      message: 'Are you sure you want to close this position permanently?',
+      message: chalk.yellow('Are you sure you want to close this position permanently?'),
+      prefix: chalk.red('⚠'),
       default: false
     }
   ]);
   
   if (!confirm) {
-    cliLogger.info('Operation cancelled');
+    console.log('\n' + chalk.yellow('ℹ Operation cancelled'));
     return;
   }
   
   try {
-    cliLogger.info('Closing position...');
+    console.log('\n' + chalk.dim('─'.repeat(60)));
+    cliLogger.info(chalk.dim('Closing position...'));
     await closePosition(position.id);
-    cliLogger.info('Position closed successfully');
+    cliLogger.info(chalk.green('✓ Position closed successfully'));
+    console.log(chalk.dim('─'.repeat(60)));
   } catch (error) {
-    cliLogger.error(`Error closing position: ${error.message}`);
+    cliLogger.error(chalk.red(`✗ Error closing position: ${error.message}`));
   }
 }
 
@@ -170,54 +192,66 @@ async function handleClosePosition(position) {
  */
 async function handleEditPosition(position) {
   try {
+    console.log('\n' + chalk.cyan('┌' + '─'.repeat(60) + '┐'));
+    console.log(chalk.cyan('│') + chalk.bold(' EDIT POSITION SETTINGS ') + ' '.repeat(40) + chalk.cyan('│'));
+    console.log(chalk.cyan('└' + '─'.repeat(60) + '┘\n'));
+    
     const updatedSettings = await inquirer.prompt([
       {
         type: 'number',
         name: 'maxFillAmount',
-        message: 'Enter your maximum bet size in USDC:',
+        message: chalk.yellow('Enter your maximum bet size in USDC:'),
+        prefix: chalk.cyan('◆'),
         default: position.maxFillAmount,
-        validate: value => value > 0 ? true : 'Please enter a positive number'
+        validate: value => value > 0 ? true : chalk.red('Please enter a positive number')
       },
       {
         type: 'number',
         name: 'premium',
-        message: 'Enter your premium percentage (e.g., 10 for 10%):',
+        message: chalk.yellow('Enter your premium percentage (e.g., 10 for 10%):'),
+        prefix: chalk.cyan('◆'),
         default: position.premium,
-        validate: value => value >= 0 && value < 100 ? true : 'Please enter a number between 0 and 100'
+        validate: value => value >= 0 && value < 100 ? true : chalk.red('Please enter a number between 0 and 100')
       },
       {
         type: 'number',
         name: 'maxVig',
-        message: 'Enter your maximum vig tolerance percentage:',
+        message: chalk.yellow('Enter your maximum vig tolerance percentage:'),
+        prefix: chalk.cyan('◆'),
         default: position.maxVig,
-        validate: value => value > 0 ? true : 'Please enter a positive number'
+        validate: value => value > 0 ? true : chalk.red('Please enter a positive number')
       },
       {
         type: 'number',
         name: 'minLiquidity',
-        message: 'Enter your minimum liquidity tolerance in USDC:',
+        message: chalk.yellow('Enter your minimum liquidity tolerance in USDC:'),
+        prefix: chalk.cyan('◆'),
         default: position.minLiquidity,
-        validate: value => value > 0 ? true : 'Please enter a positive number'
+        validate: value => value > 0 ? true : chalk.red('Please enter a positive number')
       },
       {
         type: 'number',
         name: 'minBetSizeOdds',
-        message: 'Enter minimum bet size to consider for odds calculation in USDC:',
+        message: chalk.yellow('Enter minimum bet size to consider for odds calculation in USDC:'),
+        prefix: chalk.cyan('◆'),
         default: position.minBetSizeOdds,
-        validate: value => value > 0 ? true : 'Please enter a positive number'
+        validate: value => value > 0 ? true : chalk.red('Please enter a positive number')
       },
       {
         type: 'number',
         name: 'minBetSizeVig',
-        message: 'Enter minimum bet size to consider for vig calculation in USDC:',
+        message: chalk.yellow('Enter minimum bet size to consider for vig calculation in USDC:'),
+        prefix: chalk.cyan('◆'),
         default: position.minBetSizeVig,
-        validate: value => value > 0 ? true : 'Please enter a positive number'
+        validate: value => value > 0 ? true : chalk.red('Please enter a positive number')
       }
     ]);
     
-    cliLogger.info('Updating position...');
+    console.log('\n' + chalk.dim('─'.repeat(60)));
+    cliLogger.info(chalk.dim('Updating position...'));
     await updatePosition(position.id, updatedSettings);
-    cliLogger.info('Position updated successfully');
+    cliLogger.info(chalk.green('✓ Position updated successfully'));
+    console.log(chalk.dim('─'.repeat(60)) + '\n');
     
     // Display updated position
     const updatedPosition = getPosition(position.id);
@@ -225,7 +259,37 @@ async function handleEditPosition(position) {
       displayPositionDetails(updatedPosition);
     }
   } catch (error) {
-    cliLogger.error(`Error updating position: ${error.message}`);
+    cliLogger.error(chalk.red(`✗ Error updating position: ${error.message}`));
+  }
+}
+
+/**
+ * Gets a color function for a status
+ * @param {string} status - Status string
+ * @returns {Function} - Chalk color function
+ */
+function getStatusColor(status) {
+  switch (status) {
+    case 'ACTIVE':
+      return chalk.green;
+    case 'COMPLETED':
+      return chalk.blue;
+    case 'RISK_PAUSED':
+      return chalk.yellow;
+    case 'ERROR':
+      return chalk.red;
+    case 'INITIALIZING':
+      return chalk.magenta;
+    case 'CLOSED':
+      return chalk.gray;
+    case 'CANCELLED':
+    case 'CANCELLED_RISK':
+    case 'CANCELLED_UPDATE':
+      return chalk.red;
+    case 'FILLED':
+      return chalk.green;
+    default:
+      return chalk.white;
   }
 }
 
