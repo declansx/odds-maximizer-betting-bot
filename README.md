@@ -26,7 +26,9 @@ An automated sports betting bot for the SX Bet peer-to-peer betting exchange, bu
 
 ## Overview
 
-[![SX Network Overview](https://img.youtube.com/vi/LbiLBoE51xQ/0.jpg)](https://www.youtube.com/watch?v=LbiLBoE51xQ&ab_channel=SXNetwork)
+Odds Maximizer Bot Demo on Youtube ⬇️
+
+[Watch the SX Network Overview on YouTube](https://www.youtube.com/watch?v=LbiLBoE51xQ&ab_channel=SXNetwork)
 
 The SX Bet Odds Maximizer Bot is a CLI-driven tool that automates the process of posting and managing maker orders on SX Bet. It:
 - Finds the best available taker odds for your chosen outcome.
